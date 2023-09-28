@@ -1,0 +1,21 @@
+{
+  "batches": 50,
+  "inactive_batches": 10,
+  "particles_per_batch": 1000,
+  "regions": {
+    "1": {
+      "xmin": 0.0,
+      "xmax": 50.0,
+      "Sigma_a": 0.12,
+      "Sigma_s": 0.05,
+      "nuSigma_f": 0.15
+    },
+    "2": {
+      "xmin": 50.0,
+      "xmax": 100.0,
+      "Sigma_a": 0.1,
+      "Sigma_s": 0.05,
+      "nuSigma_f": 0.12
+    }
+  }
+}
