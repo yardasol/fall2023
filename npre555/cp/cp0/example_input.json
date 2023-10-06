@@ -1,7 +1,7 @@
 {
-  "batches": 50,
-  "inactive_batches": 10,
-  "particles_per_batch": 1000,
+  "batches": 120,
+  "inactive_batches": 25,
+  "particles_per_batch": 10000,
   "regions": {
     "1": {
       "xmin": 0.0,

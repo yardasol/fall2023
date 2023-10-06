@@ -1,4 +1,6 @@
 import numpy as np
+import uncertainties
+from uncertainties import unumpy as unp
 import argparse
 import json
 import cProfile
@@ -9,21 +11,44 @@ def run():
     threads, i = parse_arguments()
 
     # Get XS, regions, boundaries
-    xs, xs_bins, regions, global_bounds, batches, inactive_batches, particles_per_batch = read_input_file(i)
+    xs, xs_bins, regions, volumes, global_bounds, batches, inactive_batches, particles_per_batch = read_input_file(i)
 
     # Particle tracking loop
+
+    # Global arrays
+    keff = []
+    batch_track_lengths = []
+    batch_collisions = []
+
+    # Loop arrays
     source_bank = []
     old_source_bank = []
     # TODO: implement machinery to allow simulating neutrons on a process
     for b in range(0, batches):
+        # Determine if inactive or active batches
         if b < inactive_batches:
             tally = False
         else:
             tally = True
             track_length_arr= []
             collision_arr= []
+
         # Source bank neutrons
-        for r in old_source_bank:
+        #for r in old_source_bank:
+        #    track_length, collisions, fission_neutrons, fission_r = \
+        #        simulate_particle(regions, global_bounds, xs, xs_bins, r=r, tally=tally)
+        #    if tally:
+        #        track_length_arr += [track_length]
+        #        collision_arr += [collisions]
+        #    if fission_neutrons:
+        #        source_bank += fission_neutrons * [fission_r]
+
+        # Base neutrons
+        for i in range(0, particles_per_batch):
+            if len(old_source_bank):
+                r = old_source_bank.pop(0)
+            else:
+                r = None
             track_length, collisions, fission_neutrons, fission_r = \
                 simulate_particle(regions, global_bounds, xs, xs_bins, r=r, tally=tally)
             if tally:
@@ -32,24 +57,40 @@ def run():
             if fission_neutrons:
                 source_bank += fission_neutrons * [fission_r]
 
-        # Base neutrons
-        for i in range(0, particles_per_batch):
-     #       print(f'Particle {i}')
-            track_length, collisions, fission_neutrons, fission_r = \
-                simulate_particle(regions, global_bounds, xs, xs_bins, r=None, tally=tally)
-            if tally:
-                track_length_arr += [track_length]
-                collision_arr += [collisions]
-            if fission_neutrons:
-                source_bank += fission_neutrons * [fission_r]
-
         N = particles_per_batch + len(old_source_bank)
         if b > 0:
-            print(f'k = {N / N_old} for generation {b}')
+            k = N / N_old
+            print(f'k = {k} for generation {b}')
+            keff += [k]
+
+        if tally:
+            batch_track_lengths += track_length_arr
+            batch_collisions += collision_arr
 
         N_old = N
         old_source_bank = source_bank
         source_bank = []
+
+    print("SIMULATION COMPLETE\n"
+          "-------------------")
+    print(f"k_eff: {np.average(keff)} +/- {np.var(keff)}")
+
+    vol_avg_sigma, total_volume = get_vol_avg_sigma(xs, volumes)
+
+    print(f"Collision estimate of flux per unit : {np.average(batch_collisions) / (vol_avg_sigma * total_volume)}")
+
+def get_vol_avg_sigma(xs, volumes):
+    numerator = []
+    denominator = []
+    vol_frac = {}
+    total_volume = np.sum(list(volumes.values()))
+    for r, vol in volumes.items():
+        vol_frac[r] = vol / total_volume
+    partial_xs = []
+    for r in xs.keys():
+        partial_xs += [xs[r]['Sigma_t'] * vol_frac[r]]
+
+    return np.sum(partial_xs), total_volume
 
 def parse_arguments():
     """Parses arguments from command line.
@@ -123,6 +164,7 @@ def read_input_file(main_inp_file):
     xs = {}
     xs_bins = {}
     regions = {}
+    volumes = {}
     xmins = []
     xmaxes = []
     # Get XS, regions for each region
@@ -144,6 +186,7 @@ def read_input_file(main_inp_file):
         xs[region_id]['Sigma_t'] = Sigma_t
 
         regions[region_id] = [values['xmin'], values['xmax']]
+        volumes[region_id] = values['xmax'] - values['xmin']
 
         # TODO: check that xmin < xmax
         xmins += [values['xmin']]
@@ -153,7 +196,7 @@ def read_input_file(main_inp_file):
     # there is no void space
     global_bounds = [np.min(xmins), np.max(xmaxes)]
 
-    return xs, xs_bins, regions, global_bounds, batches, inactive_batches, particles_per_batch
+    return xs, xs_bins, regions, volumes, global_bounds, batches, inactive_batches, particles_per_batch
 
 def simulate_particle(regions, global_bounds, xs, xs_bins, r=None, tally=True):
     """Simulate particle from birth til death
