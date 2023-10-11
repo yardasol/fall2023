@@ -6,11 +6,12 @@ class Particle:
 
     Attributes
     ----------
-    omega : list of float
-        Particle direction
+    mu, mu_x : float
+        cosine and sine of particle angle w.r.t
+        the z-axis
 
-    r : list of float
-        Particle position
+    r_x, r_y : float
+        Particle position in the x and y coordinates
 
     region_id : int
         Region ID
@@ -20,21 +21,23 @@ class Particle:
 
     """
 
-    def __init__(self, regions, global_bounds, r=None):
+    def __init__(self, regions, global_bounds, r_x=None):
         """Initalize new particle"""
         self.sample_direction()
-        self.sample_position(global_bounds, r=r)
+        self.sample_position(global_bounds, r_x=r_x)
         self.get_current_region(regions, global_bounds)
 
         self.alive = True
 
     def sample_direction(self):
-        """Sample a binary direction for the particle"""
-        # Sample -1 (-x) or 1 (+x) direction
-        omega_x = random.randrange(-1, 2, 2)
-        self.omega = omega_x
+        """Sample a direction for the particle"""
+        # Sample between 0 and 2\pi direction
+        sign_x = random.randrange(-1, 2, 2)
+        mu = random.uniform(-1, 1)
+        self.mu_x = sign_x * math.sin(math.acos(mu))
+        self.mu = mu
 
-    def sample_position(self, global_bounds, r=None):
+    def sample_position(self, global_bounds, r_x=None):
         """Sample a position for the particle
 
         Parameters
@@ -42,15 +45,18 @@ class Particle:
         global_bounds : list of float
             Global geometry boundaries
 
-        r : list of float
-            Pre-selected position to sample
+        r_x : float
+            Pre-selected position to sample. We only sample
+            the x-coordinate and assume all y-coordinates start
+            at 0
         """
 
-        if r is None:
+        if r_x is None:
             xmin, xmax = global_bounds
-            r = random.uniform(xmin, xmax)
+            r_x = random.uniform(xmin, xmax)
 
-        self.r = r
+        self.r_x = r_x
+        self.r_y = 0
 
     def get_current_region(self, regions, global_bounds):
         """Get ID of current region based on
@@ -62,8 +68,8 @@ class Particle:
             Dictionary mapping region ID to region bounds
         """
         # Check if particle is leaving defined geometry
-        if ((self.r == global_bounds[0] and self.omega == -1) or
-                self.r == global_bounds[1] and self.omega == 1):
+        if ((self.r_x <= global_bounds[0] and self.mu_x < 0) or
+                self.r_x >= global_bounds[1] and self.mu_x > 0):
             self.kill()
             return
 
@@ -71,13 +77,12 @@ class Particle:
         # on a region boundary
         # Naive algorithm, but okay for now
         for region_id, bounds in regions.items():
-            if bounds[0] < self.r < bounds[1]:
+            if bounds[0] < self.r_x < bounds[1]:
                 self.region_id = region_id
-            elif bounds[1] == self.r and self.omega == -1:
+            elif bounds[1] == self.r_x and self.mu_x < 0:
                 self.region_id = region_id
-            elif bounds[0] == self.r and self.omega == 1:
+            elif bounds[0] == self.r_x and self.mu_x > 0:
                 self.region_id = region_id
-
 
     def sample_reaction(self, xs, xs_bins):
         """Determine reaction at collision"""
@@ -92,15 +97,23 @@ class Particle:
         return math.log(1 - xi)/-xs[self.region_id]['Sigma_t']
 
     def distance_to_boundary(self, regions):
-        if self.omega == -1:
+        if self.mu_x < 0:
             idx = 0
-        else:
+        elif self.mu_x > 0:
             idx = 1
-        return abs(self.r - regions[self.region_id][idx])
+        else:
+            return math.inf
+        d_x = abs(self.r_x - regions[self.region_id][idx])
+        d = d_x / math.cos((math.pi/2) - math.acos(self.mu))
 
-    def translate(self, r):
-        """Translate the particle by r in direction omega"""
-        self.r += r * self.omega
+        return d
+
+    def translate(self, d):
+        """Translate the particle by d in the current particle direction"""
+        d_x = d * self.mu_x
+        d_y = d * self.mu
+        self.r_x += d_x
+        self.r_y += d_y
 
     def kill(self):
         """Kill the particle"""
@@ -108,16 +121,20 @@ class Particle:
 
     def sample_fission_neutrons(self, xs):
         self.kill()
-        fission_neutrons = xs[self.region_id]['nuSigma_f']/xs[self.region_id]['Sigma_a']
-        I = int(fission_neutrons)
-        R = fission_neutrons - I
+        N_fission_neutrons = xs[self.region_id]['nuSigma_f']/xs[self.region_id]['Sigma_a']
+
+        # Integer component
+        I = int(N_fission_neutrons)
+        # Remainder
+        R = N_fission_neutrons - I
+
         # Sample if we round the remainder up or down
         xi = random.random()
         if xi <= R:
-            fission_neutrons = I + 1
+            N_fission_neutrons = I + 1
         else:
-            fission_neutrons = I
-        return self.r, fission_neutrons
+            N_fission_neutrons = I
+        return self.r_x, N_fission_neutrons
 
 
 

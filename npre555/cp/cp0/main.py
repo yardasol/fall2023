@@ -3,6 +3,7 @@ import uncertainties
 from uncertainties import unumpy as unp
 import argparse
 import json
+import pandas as pd
 import cProfile
 
 from particle import Particle
@@ -17,8 +18,11 @@ def run():
 
     # Global arrays
     keff = []
-    batch_track_lengths = []
-    batch_collisions = []
+    batch_track_lengths = {'global': []}
+    batch_collisions = {'global': []}
+    for region_id in regions.keys():
+        batch_track_lengths[region_id] = []
+        batch_collisions[region_id] = []
 
     # Loop arrays
     source_bank = []
@@ -30,33 +34,42 @@ def run():
             tally = False
         else:
             tally = True
-            track_length_arr= []
-            collision_arr= []
+            track_length_dict = {'global': []}
+            collision_dict = {'global': []}
+            for region_id in regions.keys():
+                track_length_dict[region_id] = []
+                collision_dict[region_id] = []
 
         # Source bank neutrons
         #for r in old_source_bank:
-        #    track_length, collisions, fission_neutrons, fission_r = \
+        #    track_length, collisions, N_fission_neutrons, r_fission = \
         #        simulate_particle(regions, global_bounds, xs, xs_bins, r=r, tally=tally)
         #    if tally:
         #        track_length_arr += [track_length]
         #        collision_arr += [collisions]
-        #    if fission_neutrons:
-        #        source_bank += fission_neutrons * [fission_r]
+        #    if N_fission_neutrons:
+        #        source_bank += N_fission_neutrons * [r_fission]
 
         # Base neutrons
         for i in range(0, particles_per_batch):
+            # Spawn neutrons from locations in old_source_bank
+            # until we run out or we reach the number of neutrons
+            # per batch
             if len(old_source_bank):
-                r = old_source_bank.pop(0)
+                r_x = old_source_bank.pop(0)
             else:
-                r = None
-            track_length, collisions, fission_neutrons, fission_r = \
-                simulate_particle(regions, global_bounds, xs, xs_bins, r=r, tally=tally)
+                r_x = None
+            track_length, collisions, N_fission_neutrons, r_fission_x = \
+                simulate_particle(regions, global_bounds, xs, xs_bins, r_x=r_x, tally=tally)
             if tally:
-                track_length_arr += [track_length]
-                collision_arr += [collisions]
-            if fission_neutrons:
-                source_bank += fission_neutrons * [fission_r]
+                for region_id, t_length in track_length.items():
+                    track_length_dict[region_id] += [t_length]
+                for region_id, col in collisions.items():
+                    collision_dict[region_id] += [col]
+            if N_fission_neutrons:
+                source_bank += N_fission_neutrons * [r_fission_x]
 
+        # Get number of particle produced from fission
         N = particles_per_batch + len(old_source_bank)
         if b > 0:
             k = N / N_old
@@ -64,8 +77,10 @@ def run():
             keff += [k]
 
         if tally:
-            batch_track_lengths += track_length_arr
-            batch_collisions += collision_arr
+            for region_id, track_length_arr in track_length_dict.items():
+                batch_track_lengths[region_id] += track_length_arr
+            for region_id, collision_arr in collision_dict.items():
+                batch_collisions[region_id] += collision_arr
 
         N_old = N
         old_source_bank = source_bank
@@ -77,7 +92,22 @@ def run():
 
     vol_avg_sigma, total_volume = get_vol_avg_sigma(xs, volumes)
 
-    print(f"Collision estimate of flux per unit : {np.average(batch_collisions) / (vol_avg_sigma * total_volume)}")
+    print(f"Collision estimate of global flux per unit : {np.average(batch_collisions['global']) / (vol_avg_sigma * total_volume)}")
+    print(f"Tracklength estimate of global flux per unit: {np.average(batch_track_lengths['global'] / total_volume)}")
+
+    data = []
+    index = []
+    for region_id in regions.keys():
+        collision_flux = np.average(batch_collisions[region_id]) / (vol_avg_sigma * total_volume)
+        tracklength_flux = np.average(batch_track_lengths[region_id]) / total_volume
+        flux = [collision_flux, tracklength_flux]
+        data += [flux]
+        index += [region_id]
+    columns = ['collison', 'tracklength']
+
+    df = pd.DataFrame(data=data, index=index, columns=columns)
+    df.to_csv('results.csv')
+
 
 def get_vol_avg_sigma(xs, volumes):
     numerator = []
@@ -198,7 +228,7 @@ def read_input_file(main_inp_file):
 
     return xs, xs_bins, regions, volumes, global_bounds, batches, inactive_batches, particles_per_batch
 
-def simulate_particle(regions, global_bounds, xs, xs_bins, r=None, tally=True):
+def simulate_particle(regions, global_bounds, xs, xs_bins, r_x=None, tally=True):
     """Simulate particle from birth til death
 
     Parameters
@@ -208,11 +238,15 @@ def simulate_particle(regions, global_bounds, xs, xs_bins, r=None, tally=True):
     Returns
     -------
     """
-    p = Particle(regions, global_bounds, r=r)
-    track_length = 0
-    fission_neutrons = 0
-    fission_r = None
-    collisions = 0
+    p = Particle(regions, global_bounds, r_x=r_x)
+    track_length = {'global': 0}
+    N_fission_neutrons = 0
+    r_fission_x = None
+    collisions = {'global': 0}
+    for region_id in regions.keys():
+        track_length[region_id] = 0
+        collisions[region_id] = 0
+
     while p.alive:
         d_b = p.distance_to_boundary(regions)
         d_c = p.distance_to_collision(xs)
@@ -220,20 +254,23 @@ def simulate_particle(regions, global_bounds, xs, xs_bins, r=None, tally=True):
         if d_b <= d_c:
            p.translate(d_b)
            if tally:
-               track_length += d_b
+               track_length['global'] += d_b
+               track_length[p.region_id] += d_b
            p.get_current_region(regions, global_bounds)
         else:
            p.translate(d_c)
            if tally:
-               track_length += d_c
-               collisions += 1
+               track_length['global'] += d_c
+               track_length[p.region_id] += d_c
+               collisions['global'] += 1
+               collisions[p.region_id] += 1
            rxn = p.sample_reaction(xs, xs_bins)
            if rxn == 'Sigma_s':
                p.sample_direction()
            elif rxn == 'Sigma_a':
-               fission_r, fission_neutrons = p.sample_fission_neutrons(xs)
+               r_fission_x, N_fission_neutrons = p.sample_fission_neutrons(xs)
 
-    return track_length, collisions, fission_neutrons, fission_r
+    return track_length, collisions, N_fission_neutrons, r_fission_x
 
 #cProfile.run('run()')
 run()
