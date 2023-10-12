@@ -98,14 +98,15 @@ def run():
     data = []
     index = []
     for region_id in regions.keys():
-        collision_flux = np.average(batch_collisions[region_id]) / (vol_avg_sigma * total_volume)
-        tracklength_flux = np.average(batch_track_lengths[region_id]) / total_volume
+        collision_flux = np.average(batch_collisions[region_id]) / (xs[region_id]['Sigma_t'] * volumes[region_id])
+        tracklength_flux = np.average(batch_track_lengths[region_id]) / volumes[region_id]
         flux = [collision_flux, tracklength_flux]
         data += [flux]
         index += [region_id]
-    columns = ['collison', 'tracklength']
+    columns = ['collision', 'tracklength']
 
     df = pd.DataFrame(data=data, index=index, columns=columns)
+    df.index.name = 'region_id'
     df.to_csv('results.csv')
 
 
@@ -235,8 +236,22 @@ def simulate_particle(regions, global_bounds, xs, xs_bins, r_x=None, tally=True)
     ----------
 
 
+
     Returns
     -------
+    track_length : dict
+        Dictionary mapping region IDs to region-specific
+        tallies of track length. Also includes a `global`
+        key.
+    collisions : dict
+        Dictionary mapping region IDs to region-specific
+        tallies of collisions. Also includes a `global`
+        key.
+    N_fission_neutrons : int
+        Number of fission neutrons produced by the particle.
+    r_fission_x : float
+        Location of fission in the x-coordinate.
+
     """
     p = Particle(regions, global_bounds, r_x=r_x)
     track_length = {'global': 0}
