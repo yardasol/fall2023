@@ -1,0 +1,6 @@
+[submodule "npre555/cp/cp-3-transport-methods-yardasol"]
+	path = npre555/cp/cp-3-transport-methods-yardasol
+	url = git@github.com:npre5XX/cp-3-transport-methods-yardasol
+[submodule "npre555/cp/cp-2-pn-yardasol"]
+	path = npre555/cp/cp-2-pn-yardasol
+	url = git@github.com:npre5XX/cp-2-pn-yardasol
